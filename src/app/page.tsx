@@ -46,6 +46,7 @@ export default function Home() {
   const [rollNotes, setRollNotes] = useState<RollNote[]>([])
   const [activeKeys, setActiveKeys] = useState<string[]>([])
   const [tab, setTab] = useState<'quiz'|'roll'|'licks'>('quiz')
+  const [lickIdx, setLickIdx] = useState(0)
   const [gameState, setGameState] = useState<GameState>({ score:0, combo:0, xp:0, level:1, badges: new Set(), midiUsed:false })
   const animRef = useRef<number>(0)
   const rollOffsetRef = useRef(0)
@@ -144,7 +145,6 @@ export default function Home() {
   useEffect(() => () => { if (animRef.current) cancelAnimationFrame(animRef.current) }, [])
 
   const lick = LICKS[lickIdx % LICKS.length]
-  const [lickIdx, setLickIdx] = useState(0)
 
   return (
     <div className="min-h-dvh bg-gradient-to-br from-[#0d1120] via-[#0b0d12] to-[#10131a]">
