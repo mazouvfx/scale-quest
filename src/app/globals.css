@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root { color-scheme: dark; }
+  html { font-family: 'Satoshi', system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  :focus-visible { outline: 2px solid #5ce1e6; outline-offset: 3px; border-radius: 6px; }
+  ::selection { background: rgba(92,225,230,0.25); }
+}
+
+@layer components {
+  .btn { @apply rounded-2xl border border-panel-border bg-panel-2 px-5 py-3 text-sm font-medium transition-all active:scale-95 cursor-pointer; }
+  .btn-primary { @apply bg-gradient-to-br from-neon-cyan to-neon-purple text-bg border-none font-bold; }
+  .btn-ghost { @apply bg-transparent border-panel-border hover:bg-panel-2; }
+  .panel { @apply rounded-3xl border border-panel-border bg-panel/80 backdrop-blur-xl shadow-2xl p-5; }
+  .chip { @apply rounded-full border border-panel-border bg-panel-2 px-3 py-1.5 text-xs font-medium; }
+  .key-white { @apply rounded-b-xl bg-gradient-to-b from-slate-100 to-slate-300 text-slate-800 font-bold text-xs flex flex-col justify-end items-center pb-2 cursor-pointer transition-all active:scale-95; }
+  .key-black { @apply rounded-b-lg bg-gradient-to-b from-slate-800 to-slate-950 text-slate-300 font-bold text-xs flex flex-col justify-end items-center pb-1.5 cursor-pointer transition-all active:scale-95; }
+  .key-active { @apply !from-neon-cyan !to-neon-purple !text-bg shadow-lg; }
+  .roll-note { @apply absolute rounded-lg transition-none; }
+  .stat-card { @apply rounded-2xl border border-panel-border bg-panel-2 p-4; }
+  .badge { @apply rounded-full border border-panel-border bg-panel-2 px-3 py-1.5 text-xs; }
+  .badge-earned { @apply border-neon-gold bg-neon-gold/10 text-neon-gold; }
+}
