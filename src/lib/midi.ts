@@ -10,10 +10,12 @@ export interface MidiNote {
 interface MIDIMessageEvent extends Event {
   data: Uint8Array
 }
-interface MIDIInput extends EventTarget {
+interface MIDIInput {
   name: string
-  addEventListener(type: 'midimessage', listener: (e: MIDIMessageEvent) => void): void
-  removeEventListener(type: 'midimessage', listener: (e: MIDIMessageEvent) => void): void
+  addEventListener(type: 'midimessage', listener: (e: MIDIMessageEvent) => void, options?: boolean | AddEventListenerOptions): void
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions): void
+  removeEventListener(type: 'midimessage', listener: (e: MIDIMessageEvent) => void, options?: boolean | EventListenerOptions): void
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions): void
 }
 interface MIDIAccess {
   inputs: Map<string, MIDIInput>
