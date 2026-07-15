@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { getAllScales, SCALE_PATTERNS } from '@/lib/scales'
 import { LICKS } from '@/lib/licks'
 import { useMidi } from '@/lib/midi'
+import { KNOWLEDGE_TOPICS, randomTheoryQuestions, getTopic, type TheoryQuizQ } from '@/lib/knowledge'
 
 const NOTE_COLORS = ['#5ce1e6','#7c8cff','#e766ff','#f8cf62','#69da8c','#ff7d95']
 const WHITE_NOTES = ['C','D','E','F','G','A','B']
@@ -10,7 +11,8 @@ const FAMILIES = [
   { value: 'majorPenta', label: 'Penta majeure' },
   { value: 'minorPenta', label: 'Penta mineure' },
   { value: 'diminished', label: 'Diminuee' },
-  { value: 'jazz', label: 'Jazz' },
+  { value: 'jazz', label: 'Jazz (modes & bebop)' },
+  { value: 'theory', label: 'Theorie Levine' },
   { value: 'funk', label: 'Funk' },
   { value: 'mixed', label: 'Mix total' },
 ]
@@ -18,6 +20,7 @@ const MODES = [
   { value: 'notes', label: 'Notes de la gamme' },
   { value: 'name', label: 'Nom de la gamme' },
   { value: 'formula', label: 'Formule' },
+  { value: 'chord', label: 'Accord associe' },
 ]
 const BADGE_DEFS = [
   { slug: 'first-correct', label: 'Premier correct', cond: (s: GameState) => s.score >= 1 },
@@ -25,42 +28,56 @@ const BADGE_DEFS = [
   { slug: 'combo-5', label: 'Combo x5', cond: (s: GameState) => s.combo >= 5 },
   { slug: 'level-3', label: 'Niveau 3', cond: (s: GameState) => s.level >= 3 },
   { slug: 'midi-play', label: 'MIDI connecte', cond: (s: GameState) => s.midiUsed },
+  { slug: 'theory-5', label: 'Sage Levine', cond: (s: GameState) => s.theoryScore >= 5 },
 ]
 interface GameState {
-  score: number; combo: number; xp: number; level: number; badges: Set<string>; midiUsed: boolean
+  score: number; combo: number; xp: number; level: number; badges: Set<string>; midiUsed: boolean; theoryScore: number
 }
 interface RollNote { note: string; x: number; y: number; w: number; h: number; color: string; id: string }
 interface QuizQuestion {
-  text: string; answers: string[]; correct: string; scale: { root: string; notes: string[]; label: string; tips: string }
+  text: string
+  answers: string[]
+  correct: string
+  scale: { root: string; notes: string[]; label: string; tips: string; chordHint?: string }
 }
+
+type Tab = 'quiz' | 'theorie' | 'roll' | 'licks'
+type TheoryPane = 'fiches' | 'quiz'
 
 function shuffle<T>(a: T[]): T[] { return [...a].sort(() => Math.random() - 0.5) }
 function sample<T>(arr: T[], n: number, exclude?: T): T[] { return shuffle(arr.filter(v => v !== exclude)).slice(0, n) }
 
 export default function Home() {
-  const [family, setFamily] = useState('majorPenta')
+  const [family, setFamily] = useState('jazz')
   const [mode, setMode] = useState('notes')
   const [tempo, setTempo] = useState(110)
   const [question, setQuestion] = useState<QuizQuestion | null>(null)
   const [chosen, setChosen] = useState<string | null>(null)
   const [rollNotes, setRollNotes] = useState<RollNote[]>([])
   const [activeKeys, setActiveKeys] = useState<string[]>([])
-  const [tab, setTab] = useState<'quiz'|'roll'|'licks'>('quiz')
+  const [tab, setTab] = useState<Tab>('quiz')
+  const [theoryPane, setTheoryPane] = useState<TheoryPane>('fiches')
+  const [topicIdx, setTopicIdx] = useState(0)
+  const [theoryQ, setTheoryQ] = useState<TheoryQuizQ | null>(null)
+  const [theoryChosen, setTheoryChosen] = useState<string | null>(null)
   const [lickIdx, setLickIdx] = useState(0)
-  const [gameState, setGameState] = useState<GameState>({ score:0, combo:0, xp:0, level:1, badges: new Set(), midiUsed:false })
+  const [gameState, setGameState] = useState<GameState>({ score:0, combo:0, xp:0, level:1, badges: new Set(), midiUsed:false, theoryScore:0 })
   const animRef = useRef<number>(0)
   const rollOffsetRef = useRef(0)
   const [midiExpected, setMidiExpected] = useState<string[]>([])
   const [midiProgress, setMidiProgress] = useState(0)
 
-  const handleCorrect = useCallback(() => {
+  const handleCorrect = useCallback((opts?: { theory?: boolean }) => {
     setGameState(prev => {
       const combo = prev.combo + 1
-      const xp = prev.xp + 15 + (combo > 2 ? combo * 3 : 0)
+      const xpGain = opts?.theory ? 20 : 15
+      const xp = prev.xp + xpGain + (combo > 2 ? combo * 3 : 0)
       const level = Math.floor(xp / 100) + 1
+      const theoryScore = prev.theoryScore + (opts?.theory ? 1 : 0)
       const badges = new Set(prev.badges)
-      BADGE_DEFS.forEach(b => { if (b.cond({ ...prev, combo, xp, level })) badges.add(b.slug) })
-      return { ...prev, score: prev.score + 1, combo, xp, level, badges }
+      const next = { ...prev, combo, xp, level, theoryScore, score: prev.score + 1 }
+      BADGE_DEFS.forEach(b => { if (b.cond(next)) badges.add(b.slug) })
+      return { ...next, badges }
     })
   }, [])
 
@@ -84,6 +101,7 @@ export default function Home() {
 
   const xpNeeded = gameState.level * 100
   const xpPct = Math.min(100, (gameState.xp % xpNeeded) / xpNeeded * 100)
+  const topic = KNOWLEDGE_TOPICS[topicIdx % KNOWLEDGE_TOPICS.length]
 
   function handleWrong() { setGameState(prev => ({ ...prev, combo: 0 })) }
 
@@ -99,6 +117,16 @@ export default function Home() {
       const correct = cur.root + ' ' + cur.label
       const wrongs = sample(scales.map((s:any) => s.root + ' ' + s.label), 3, correct)
       q = { text: 'Nom de cette gamme ? ' + cur.notes.join(' - '), answers: shuffle([correct, ...wrongs]), correct, scale: cur }
+    } else if (mode === 'chord') {
+      const correct = cur.chordHint || '—'
+      const pool = Object.values(SCALE_PATTERNS).map((p:any) => p.chordHint).filter(Boolean) as string[]
+      const wrongs = sample(pool, 3, correct)
+      q = {
+        text: 'Quel accord / usage typique pour ' + cur.root + ' ' + cur.label + ' ?',
+        answers: shuffle([correct, ...wrongs]),
+        correct,
+        scale: cur,
+      }
     } else {
       const correct = cur.formula
       const wrongs = sample(Object.values(SCALE_PATTERNS).map((p:any) => p.formula), 3, correct)
@@ -111,10 +139,22 @@ export default function Home() {
     setTimeout(() => setActiveKeys([]), 1200)
   }
 
+  function newTheoryQuestion() {
+    const [q] = randomTheoryQuestions(1)
+    setTheoryQ({ ...q, answers: shuffle(q.answers) })
+    setTheoryChosen(null)
+  }
+
   function answer(a: string) {
     if (chosen) return
     setChosen(a)
     if (a === question?.correct) handleCorrect(); else handleWrong()
+  }
+
+  function answerTheory(a: string) {
+    if (theoryChosen) return
+    setTheoryChosen(a)
+    if (a === theoryQ?.correct) handleCorrect({ theory: true }); else handleWrong()
   }
 
   function buildRollNotes(notes: string[]) {
@@ -145,6 +185,12 @@ export default function Home() {
   useEffect(() => () => { if (animRef.current) cancelAnimationFrame(animRef.current) }, [])
 
   const lick = LICKS[lickIdx % LICKS.length]
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'quiz', label: 'Quiz gammes' },
+    { id: 'theorie', label: 'Connaissances' },
+    { id: 'roll', label: 'Piano Roll' },
+    { id: 'licks', label: 'Licks' },
+  ]
 
   return (
     <div className="min-h-dvh bg-gradient-to-br from-[#0d1120] via-[#0b0d12] to-[#10131a]">
@@ -154,7 +200,7 @@ export default function Home() {
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-neon-cyan to-neon-pink grid place-items-center shadow-lg text-xl">piano</div>
             <div>
               <h1 className="font-display text-3xl font-semibold tracking-tight">Scale Quest</h1>
-              <p className="text-slate-400 text-sm">Memorise gammes, licks et patterns</p>
+              <p className="text-slate-400 text-sm">Gammes, theorie jazz (Levine) & licks</p>
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -175,10 +221,10 @@ export default function Home() {
           <span className="text-xs text-slate-500">{gameState.xp} XP</span>
         </div>
 
-        <div className="flex gap-2 mb-5">
-          {(['quiz','roll','licks'] as const).map(t => (
-            <button key={t} className={'btn text-sm ' + (tab===t ? 'btn-primary' : '')} onClick={()=>setTab(t)}>
-              {t==='quiz' ? 'Quiz' : t==='roll' ? 'Piano Roll' : 'Licks'}
+        <div className="flex gap-2 mb-5 flex-wrap">
+          {tabs.map(t => (
+            <button key={t.id} className={'btn text-sm ' + (tab===t.id ? 'btn-primary' : '')} onClick={()=>setTab(t.id)}>
+              {t.label}
             </button>
           ))}
         </div>
@@ -212,8 +258,11 @@ export default function Home() {
                     </div>
                     {chosen && (
                       <div className={'mt-4 rounded-2xl p-3 text-sm ' + (chosen===question.correct ? 'bg-neon-green/10 border border-neon-green/30 text-neon-green' : 'bg-neon-red/10 border border-neon-red/30 text-neon-red')}>
-                        {chosen===question.correct ? 'Correct!' : 'Rate - bonne reponse: '+question.correct}
+                        {chosen===question.correct ? 'Correct!' : 'Rate — bonne reponse: '+question.correct}
                         <div className="text-slate-400 mt-1">{question.scale.tips}</div>
+                        {question.scale.chordHint && (
+                          <div className="text-neon-cyan/80 mt-1 text-xs">Accord / usage : {question.scale.chordHint}</div>
+                        )}
                       </div>
                     )}
                     {connected && midiExpected.length > 0 && (
@@ -226,7 +275,96 @@ export default function Home() {
                     )}
                   </>
                 ) : (
-                  <div className="text-center py-12 text-slate-500">Appuie sur Nouvelle question pour commencer.</div>
+                  <div className="text-center py-12 text-slate-500">Choisis une famille (ex. Theorie Levine) puis Nouvelle question.</div>
+                )}
+              </section>
+            )}
+
+            {tab === 'theorie' && (
+              <section className="panel">
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <button className={'btn text-sm ' + (theoryPane==='fiches' ? 'btn-primary' : '')} onClick={()=>setTheoryPane('fiches')}>Fiches</button>
+                  <button className={'btn text-sm ' + (theoryPane==='quiz' ? 'btn-primary' : '')} onClick={()=>{ setTheoryPane('quiz'); if (!theoryQ) newTheoryQuestion() }}>Quiz theorie</button>
+                </div>
+                <p className="text-xs text-slate-500 mb-4">
+                  Points cles paraphrases d&apos;apres Mark Levine — <em>The Jazz Theory Book</em> (Sher Music). Pour approfondir, lis l&apos;original.
+                </p>
+
+                {theoryPane === 'fiches' && (
+                  <>
+                    <div className="flex flex-wrap gap-2 mb-4 max-h-36 overflow-y-auto">
+                      {KNOWLEDGE_TOPICS.map((t, i) => (
+                        <button
+                          key={t.id}
+                          className={'btn text-xs ' + (topicIdx===i ? 'btn-primary' : '')}
+                          onClick={()=>setTopicIdx(i)}
+                        >
+                          {t.title}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="rounded-2xl bg-panel-2 border border-panel-border p-5">
+                      <div className="text-xs text-neon-cyan mb-1">{topic.chapter}</div>
+                      <h2 className="font-display text-xl font-semibold mb-3">{topic.title}</h2>
+                      <ul className="space-y-2 text-sm text-slate-300 mb-4">
+                        {topic.bullets.map((b, i) => (
+                          <li key={i} className="flex gap-2">
+                            <span className="text-neon-gold mt-0.5">•</span>
+                            <span>{b}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="rounded-xl p-3 text-sm border border-neon-gold/20 bg-neon-gold/5 text-neon-gold/90">
+                        A retenir : {topic.takeaway}
+                      </div>
+                      <div className="flex gap-3 mt-4">
+                        <button className="btn" onClick={()=>setTopicIdx((topicIdx - 1 + KNOWLEDGE_TOPICS.length) % KNOWLEDGE_TOPICS.length)}>Precedent</button>
+                        <button className="btn btn-primary" onClick={()=>setTopicIdx((topicIdx + 1) % KNOWLEDGE_TOPICS.length)}>Suivant</button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {theoryPane === 'quiz' && (
+                  <>
+                    <div className="mb-4">
+                      <button className="btn btn-primary" onClick={newTheoryQuestion}>Nouvelle question theorie</button>
+                    </div>
+                    {theoryQ ? (
+                      <>
+                        <div className="rounded-2xl bg-panel-2 border border-panel-border p-4 mb-4 font-medium">{theoryQ.question}</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {theoryQ.answers.map((a,i) => {
+                            let cls = 'btn text-left text-sm'
+                            if (theoryChosen) {
+                              if (a === theoryQ.correct) cls += ' !border-neon-green !bg-neon-green/10 !text-neon-green'
+                              else if (a === theoryChosen) cls += ' !border-neon-red !bg-neon-red/10 !text-neon-red'
+                            }
+                            return <button key={i} className={cls} onClick={()=>answerTheory(a)}>{a}</button>
+                          })}
+                        </div>
+                        {theoryChosen && (
+                          <div className={'mt-4 rounded-2xl p-3 text-sm ' + (theoryChosen===theoryQ.correct ? 'bg-neon-green/10 border border-neon-green/30 text-neon-green' : 'bg-neon-red/10 border border-neon-red/30 text-neon-red')}>
+                            {theoryChosen===theoryQ.correct ? 'Correct!' : 'Rate — bonne reponse: '+theoryQ.correct}
+                            <div className="text-slate-400 mt-1">{theoryQ.explain}</div>
+                            {getTopic(theoryQ.topicId) && (
+                              <button
+                                className="mt-2 text-xs text-neon-cyan underline"
+                                onClick={()=>{
+                                  const idx = KNOWLEDGE_TOPICS.findIndex(t => t.id === theoryQ.topicId)
+                                  if (idx >= 0) { setTopicIdx(idx); setTheoryPane('fiches') }
+                                }}
+                              >
+                                Voir la fiche : {getTopic(theoryQ.topicId)?.title}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-center py-12 text-slate-500">Lance un quiz theorie pour tester les points cles du livre.</div>
+                    )}
+                  </>
                 )}
               </section>
             )}
@@ -291,7 +429,7 @@ export default function Home() {
                 <div className="stat-card"><div className="text-slate-500 text-xs">Score</div><div className="text-2xl font-display font-semibold text-neon-cyan">{gameState.score}</div></div>
                 <div className="stat-card"><div className="text-slate-500 text-xs">Combo</div><div className="text-2xl font-display font-semibold text-neon-pink">{gameState.combo}x</div></div>
                 <div className="stat-card"><div className="text-slate-500 text-xs">Niveau</div><div className="text-2xl font-display font-semibold text-neon-gold">{gameState.level}</div></div>
-                <div className="stat-card"><div className="text-slate-500 text-xs">XP</div><div className="text-2xl font-display font-semibold text-neon-purple">{gameState.xp}</div></div>
+                <div className="stat-card"><div className="text-slate-500 text-xs">Theorie</div><div className="text-2xl font-display font-semibold text-neon-purple">{gameState.theoryScore}</div></div>
               </div>
             </section>
             <section className="panel">
